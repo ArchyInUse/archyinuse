@@ -2,17 +2,16 @@
 
 - type: github
   icon: "fab fa-github"
+  url: "https://github.com/ArchyInUse/"
 
-- type: twitter
-  icon: "fa-brands fa-x-twitter"
+- type: linkedin
+  icon: "fab fa-linkedin"
+  url: "https://www.linkedin.com/in/gilad-asher-chen-9b272026b/"
 
 - type: email
   icon: "fas fa-envelope"
   noblank: true # open link in current tab
-
-- type: rss
-  icon: "fas fa-rss"
-  noblank: true
+  url: "archyinuse@gmail.com"
 # Uncomment and complete the url below to enable more contact options
 #
 # - type: mastodon
