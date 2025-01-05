@@ -10,6 +10,8 @@ This was a very strange release coming from HTB, as I've not seen OSCP-like boxe
 
 Unlike many HTB boxes, we actually start out with credentials to the domain for a user account `olivia` with the password `ichliebedich` (sidenote, that translates to I love you in german, how nice of them!)
 
+If you are an active HTB pentester, please only read this if you completed the box! This article is aimed at recruiters and team leads, not as a solution!!
+
 ## Foothold
 
 I started out by running a normal port scan `nmap -sV -T5 administrator.htb`:
