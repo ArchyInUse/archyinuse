@@ -1,0 +1,4 @@
+I"�<p>Hey everyone, today I want to explore a medium machine on HTB called Administrator.
+The main themes that persists throughout this box are AD privilege mismanagement abuse to gain increasingly privileged users, with some password cracking thrown into the mix.
+This was a very strange release coming from HTB, as I’ve not seen OSCP-like boxes in a very long time, but I’ll touch more on that in the conclusion.</p>
+:ET

